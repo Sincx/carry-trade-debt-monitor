@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Carry Trade / US 30Y / AI Infra Debt Monitor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>Carry Trade / US 30Y Treasury / AI Infra Debt Monitor</h1>
+    <div class="sub">JPY carry trade &rarr; US 30Y demand &rarr; hyperscaler/neocloud/AI-lab debt cost. Local, self-hosted, free data sources only.</div>
+  </div>
+  <div class="pill-row">
+    {% for c in collector_health %}
+      <span class="badge badge-{{ c.status }}" title="{{ c.error_message or '' }}">{{ c.collector_name }}</span>
+    {% endfor %}
+  </div>
+</header>
+<main>
+
+  {% if levels.next_boj_meeting %}
+  <div class="card section" style="border-color: var(--accent);">
+    Next BOJ meeting: <strong>{{ levels.next_boj_meeting.date }}</strong>
+  </div>
+  {% endif %}
+
+  <div class="grid grid-4 section">
+    <div class="card">
+      <h3>Japan CPI (YoY)</h3>
+      <div class="stat-value">{{ levels.cpi_yoy if levels.cpi_yoy is not none else '—' }}{{ '%' if levels.cpi_yoy is not none else '' }}</div>
+      <div class="stat-sub">Headline, all-items index</div>
+    </div>
+    <div class="card">
+      <h3>BOJ Policy Rate</h3>
+      <div class="stat-value">{{ levels.boj.rate_after if levels.boj else '—' }}{{ '%' if levels.boj else '' }}</div>
+      <div class="stat-sub">
+        {% if levels.boj %}as of {{ levels.boj.date }} &middot; tone: {{ levels.boj.statement_tone }} (heuristic){% else %}no data collected yet{% endif %}
+      </div>
+    </div>
+    <div class="card">
+      <h3>USD/JPY Spot</h3>
+      <div class="stat-value">{{ levels.usdjpy.rate if levels.usdjpy else '—' }}</div>
+      <div class="stat-sub">{% if levels.usdjpy %}as of {{ levels.usdjpy.timestamp }}{% else %}no data collected yet{% endif %}</div>
+    </div>
+    <div class="card">
+      <h3>US 30Y Treasury</h3>
+      <div class="stat-value">{{ levels.us30y_close.yield if levels.us30y_close else '—' }}{{ '%' if levels.us30y_close else '' }}</div>
+      <div class="stat-sub">
+        official close {{ levels.us30y_close.timestamp if levels.us30y_close else '—' }}<br>
+        {% if levels.us30y_intraday %}intraday: {{ levels.us30y_intraday.yield }}% @ {{ levels.us30y_intraday.timestamp }}{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Recent Trends (180 days)</h2>
+    <div class="grid grid-2">
+      <div class="card"><h3>US 30Y Yield</h3><div id="chart-us30y" class="chart-holder"></div></div>
+      <div class="card"><h3>USD/JPY</h3><div id="chart-usdjpy" class="chart-holder"></div></div>
+      <div class="card"><h3>Japan CPI Index</h3><div id="chart-cpi" class="chart-holder"></div></div>
+      <div class="card"><h3>BOJ Policy Rate</h3><div id="chart-boj" class="chart-holder"></div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Correlation Panel</h2>
+    <div class="tier-note">Per 7.1: BOJ/CPI series are low-frequency (monthly / every 6-7 weeks) &mdash; sample size (N) is shown for every figure. Small N means low statistical power; do not over-interpret. Granger rows are exploratory diagnostics only.</div>
+    {% if correlations %}
+    <table>
+      <thead><tr><th>Series A</th><th>Series B</th><th>Window</th><th>Method</th><th>Value</th><th>N</th><th>p-value</th><th>Lag</th><th></th></tr></thead>
+      <tbody>
+      {% for c in correlations %}
+        <tr class="{{ 'regime-shift' if c.regime_shift_flag else '' }}">
+          <td>{{ c.series_a }}</td>
+          <td>{{ c.series_b }}</td>
+          <td>{{ c.window_days if c.window_days else 'event-driven' }}</td>
+          <td>{{ c.method }}</td>
+          <td>{{ '%.3f'|format(c.correlation_value) if c.correlation_value is not none else '—' }}</td>
+          <td>{{ c.sample_size }}</td>
+          <td>{{ '%.3f'|format(c.p_value) if c.p_value is not none else '—' }}</td>
+          <td>{{ c.lag_days }}</td>
+          <td>{% if c.regime_shift_flag %}<span class="badge badge-warning">regime shift</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No correlation results yet. Run collectors, then <code>python scripts/run_analysis.py</code>.</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Debt &amp; Rate-Exposure Overview</h2>
+    <div class="tier-note">
+      Two exposure channels, shown separately rather than blended into one score (per the 2026-09-10 research
+      model this panel is built from): <strong>near-term maturity %</strong> is debt that must be refinanced soon,
+      regardless of cash flow; <strong>capex/OCF</strong> is how much of this year's buildout is <em>not</em>
+      covered by operating cash flow, meaning new debt or equity must be raised no matter what maturities look
+      like. Sorted by capex/OCF descending — highest external-financing dependency first.
+    </div>
+    {% if financial_summary %}
+    <table>
+      <thead><tr><th>Entity</th><th>Total Debt Outstanding</th><th>Wtd Avg Coupon</th><th>Near-Term Maturity (next 4yr)</th><th>Latest FY Capex</th><th>Latest FY OCF</th><th>Capex/OCF</th><th>FY Free Cash Flow</th></tr></thead>
+      <tbody>
+      {% for s in financial_summary %}
+        <tr class="{{ 'regime-shift' if s.capex_ocf_ratio and s.capex_ocf_ratio >= 100 else '' }}">
+          <td><a href="/entity/{{ s.entity_id }}">{{ s.name }}</a></td>
+          <td>
+            {{ '${:,.1f}B'.format(s.total_debt_outstanding/1e9) if s.total_debt_outstanding else '$0 (no debt)' }}
+            {% if s.total_debt_outstanding and not s.is_itemized %}<span class="badge badge-partial" title="XBRL aggregate balance-sheet figure -- this filer's debt note isn't broken out instrument-by-instrument yet">aggregate only</span>{% endif %}
+          </td>
+          <td>{{ '%.2f'|format(s.weighted_avg_coupon) + '%' if s.weighted_avg_coupon is not none else '—' }}</td>
+          <td>{% if not s.is_itemized %}n/a{% elif s.near_term_maturity_pct is not none %}{{ '%.1f'|format(s.near_term_maturity_pct) }}%{% else %}—{% endif %}</td>
+          <td>{{ '${:,.1f}B'.format(s.latest_fy_capex/1e9) if s.latest_fy_capex is not none else '—' }}</td>
+          <td>{{ '${:,.1f}B'.format(s.latest_fy_ocf/1e9) if s.latest_fy_ocf is not none else '—' }}</td>
+          <td>
+            {% if s.capex_ocf_ratio is not none %}
+              <span class="badge badge-{{ 'critical' if s.capex_ocf_ratio >= 100 else ('warning' if s.capex_ocf_ratio >= 75 else 'success') }}">{{ '%.0f'|format(s.capex_ocf_ratio) }}%</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ '${:,.1f}B'.format(s.latest_fy_fcf/1e9) if s.latest_fy_fcf is not none else '—' }}{% if s.latest_fy_fcf is not none and s.latest_fy_fcf < 0 %} <span class="badge badge-critical">negative</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No financial summary yet. Run <code>python analysis/entity_financial_summary.py</code>.</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Debt Maturity Ladder (aggregate, currently open instruments)</h2>
+    {% if ladder.rows %}
+    <div class="card"><div id="chart-ladder"></div></div>
+    {% else %}
+    <div class="empty-state">No debt instruments collected yet. Run <code>python collectors/sec_edgar_debt.py</code>.</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Tracked Entities</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Category</th><th>Tier</th><th>Ticker</th><th></th></tr></thead>
+      <tbody>
+      {% for e in entities %}
+        <tr>
+          <td>{{ e.name }}</td>
+          <td>{{ e.category }}</td>
+          <td><span class="badge badge-{{ e.data_tier }}">{{ 'structured (SEC)' if e.data_tier == 'structured' else 'reported / unverified' }}</span></td>
+          <td>{{ e.ticker or '—' }}</td>
+          <td><a href="/entity/{{ e.entity_id }}">view &rarr;</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Recent Activity / Alerts</h2>
+    {% if activity %}
+    <table>
+      <thead><tr><th>Time</th><th>Type</th><th>Severity</th><th>Message</th></tr></thead>
+      <tbody>
+      {% for a in activity %}
+        <tr>
+          <td>{{ a.timestamp }}</td>
+          <td>{{ a.alert_type }}</td>
+          <td><span class="badge badge-{{ a.severity }}">{{ a.severity }}</span></td>
+          <td>{{ a.message }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No alerts logged yet.</div>
+    {% endif %}
+  </div>
+
+</main>
+
+<script>
+// Self-contained SVG chart rendering -- no external JS dependency, so this
+// dashboard has zero reliance on reaching a CDN (which failed to load here
+// due to the same local TLS-interception issue that blocked the data
+// sources -- see README). Intentionally minimal: line charts and one
+// stacked bar chart, not a general-purpose library.
+const trends = {{ trends | tojson }};
+const ladder = {{ ladder | tojson }};
+const W = 600, H = 200, PAD = 28;
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function lineChart(id, data, color) {
+  const holder = document.getElementById(id);
+  if (!holder) return;
+  if (!data.length) { holder.innerHTML = '<div class="empty-state">No data yet</div>'; return; }
+
+  const values = data.map(r => r.v);
+  const minV = Math.min(...values), maxV = Math.max(...values);
+  const span = (maxV - minV) || 1;
+  const n = data.length;
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: '220' });
+  const x = i => PAD + (i / Math.max(n - 1, 1)) * (W - 2 * PAD);
+  const y = v => H - PAD - ((v - minV) / span) * (H - 2 * PAD);
+
+  // gridlines + axis labels (min/max)
+  [minV, maxV].forEach(v => {
+    svg.appendChild(svgEl('line', { x1: PAD, x2: W - PAD, y1: y(v), y2: y(v), stroke: '#2a3348', 'stroke-width': 1 }));
+    const t = svgEl('text', { x: 4, y: y(v) + 4, fill: '#93a0b8', 'font-size': 10 });
+    t.textContent = v.toFixed(2);
+    svg.appendChild(t);
+  });
+
+  const points = data.map((r, i) => `${x(i)},${y(r.v)}`).join(' ');
+  svg.appendChild(svgEl('polyline', { points, fill: 'none', stroke: color, 'stroke-width': 2 }));
+
+  const first = data[0].d, last = data[n - 1].d;
+  [[first, PAD], [last, W - PAD]].forEach(([label, tx]) => {
+    const t = svgEl('text', { x: tx, y: H - 6, fill: '#93a0b8', 'font-size': 10, 'text-anchor': tx === PAD ? 'start' : 'end' });
+    t.textContent = label;
+    svg.appendChild(t);
+  });
+
+  holder.innerHTML = '';
+  holder.appendChild(svg);
+}
+lineChart('chart-us30y', trends.us30y, '#5b9dff');
+lineChart('chart-usdjpy', trends.usdjpy, '#3ecf8e');
+lineChart('chart-cpi', trends.cpi, '#f5a623');
+lineChart('chart-boj', trends.boj_rate, '#b47af0');
+
+function stackedBarChart(id, years, entities, rows) {
+  const holder = document.getElementById(id);
+  if (!holder || !rows.length) return;
+  const palette = ['#5b9dff','#3ecf8e','#f5a623','#b47af0','#ef5350','#4dd0e1','#ffb74d','#81c784','#ba68c8','#64b5f6','#a1887f','#e57373'];
+  const byYear = years.map(yr => entities.map(ent => (rows.find(r => r.entity_id === ent && r.maturity_year === yr) || {}).total_principal || 0));
+  const yearTotals = byYear.map(vals => vals.reduce((a, b) => a + b, 0));
+  const maxTotal = Math.max(...yearTotals, 1);
+
+  const barW = (W - 2 * PAD) / years.length * 0.7;
+  const gap = (W - 2 * PAD) / years.length;
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H + 20}`, width: '100%', height: '240' });
+
+  years.forEach((yr, i) => {
+    let yOffset = H - PAD;
+    const xPos = PAD + i * gap + (gap - barW) / 2;
+    entities.forEach((ent, j) => {
+      const val = byYear[i][j];
+      if (!val) return;
+      const barH = (val / maxTotal) * (H - 2 * PAD);
+      svg.appendChild(svgEl('rect', { x: xPos, y: yOffset - barH, width: barW, height: barH, fill: palette[j % palette.length] }));
+      yOffset -= barH;
+    });
+    const t = svgEl('text', { x: xPos + barW / 2, y: H - PAD + 14, fill: '#93a0b8', 'font-size': 10, 'text-anchor': 'middle' });
+    t.textContent = yr;
+    svg.appendChild(t);
+  });
+
+  holder.innerHTML = '';
+  holder.appendChild(svg);
+
+  const legend = document.createElement('div');
+  legend.className = 'pill-row';
+  legend.style.marginTop = '8px';
+  entities.forEach((ent, j) => {
+    const span = document.createElement('span');
+    span.className = 'badge';
+    span.style.background = palette[j % palette.length] + '33';
+    span.style.color = palette[j % palette.length];
+    span.textContent = ent;
+    legend.appendChild(span);
+  });
+  holder.parentElement.appendChild(legend);
+}
+if (ladder.rows && ladder.rows.length) {
+  stackedBarChart('chart-ladder', ladder.years, ladder.entities, ladder.rows);
+}
+</script>
+</body>
+</html>

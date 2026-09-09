@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+db/monitor.db
+db/estat_cache.json
+dashboard.log

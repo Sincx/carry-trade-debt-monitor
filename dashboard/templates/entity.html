@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ entity.name if entity else 'Entity' }} — Debt Monitor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div>
+    <h1>{{ entity.name if entity else 'Unknown entity' }}</h1>
+    <div class="sub"><a href="/">&larr; back to dashboard</a></div>
+  </div>
+  {% if entity %}<span class="badge badge-{{ entity.data_tier }}">{{ 'structured (SEC)' if entity.data_tier == 'structured' else 'reported / unverified' }}</span>{% endif %}
+</header>
+<main>
+{% if not entity %}
+  <div class="empty-state">Entity not found.</div>
+{% else %}
+
+  {% if entity.data_tier == 'reported_unverified' %}
+  <div class="card section" style="border-color: var(--unverified);">
+    This entity has no public filing obligation. Everything below is a best-effort press/report feed,
+    not verified structured financial data (see spec section 7.5). Treat figures as directional, not precise.
+  </div>
+  {% endif %}
+
+  {% if summary %}
+  <div class="grid grid-4 section">
+    <div class="card">
+      <h3>Total Debt Outstanding</h3>
+      <div class="stat-value">{{ '${:,.1f}B'.format(summary.total_debt_outstanding/1e9) if summary.total_debt_outstanding else '$0' }}</div>
+      <div class="stat-sub">
+        {% if not summary.is_itemized and summary.total_debt_outstanding %}
+          <span class="badge badge-partial">aggregate only</span> not yet broken out instrument-by-instrument
+        {% elif summary.weighted_avg_coupon is not none %}
+          wtd avg coupon {{ '%.2f'|format(summary.weighted_avg_coupon) }}%
+        {% else %}no open debt{% endif %}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Near-Term Maturity (next 4yr)</h3>
+      <div class="stat-value">{% if not summary.is_itemized %}n/a{% elif summary.near_term_maturity_pct is not none %}{{ '%.1f'|format(summary.near_term_maturity_pct) }}%{% else %}—{% endif %}</div>
+      <div class="stat-sub">
+        {% if not summary.is_itemized %}requires itemized debt breakdown (not available for this filer yet)
+        {% elif summary.near_term_maturity_amount %}${{ '{:,.1f}B'.format(summary.near_term_maturity_amount/1e9) }} of total debt
+        {% else %}of total debt outstanding{% endif %}
+      </div>
+    </div>
+    <div class="card">
+      <h3>Capex / OCF Ratio</h3>
+      <div class="stat-value">
+        {% if summary.capex_ocf_ratio is not none %}
+          <span class="badge badge-{{ 'critical' if summary.capex_ocf_ratio >= 100 else ('warning' if summary.capex_ocf_ratio >= 75 else 'success') }}">{{ '%.0f'|format(summary.capex_ocf_ratio) }}%</span>
+        {% else %}—{% endif %}
+      </div>
+      <div class="stat-sub">{% if summary.capex_ocf_ratio is not none and summary.capex_ocf_ratio >= 100 %}capex exceeds operating cash flow{% else %}share of OCF spent on capex{% endif %} (FY {{ summary.latest_fy_period_end or '—' }})</div>
+    </div>
+    <div class="card">
+      <h3>FY Free Cash Flow</h3>
+      <div class="stat-value">{{ '${:,.1f}B'.format(summary.latest_fy_fcf/1e9) if summary.latest_fy_fcf is not none else '—' }}</div>
+      <div class="stat-sub">{% if summary.latest_fy_fcf is not none and summary.latest_fy_fcf < 0 %}<span class="badge badge-critical">negative</span>{% else %}FY {{ summary.latest_fy_period_end or '—' }}{% endif %}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="section">
+    <h2>Debt Instruments {{ '(structured, SEC-derived)' if entity.data_tier == 'structured' else '' }}</h2>
+    {% if debt %}
+    <table>
+      <thead><tr><th>Type</th><th>Principal</th><th>Coupon</th><th>Maturity</th><th>Status</th><th>30Y yield at issuance</th><th>Source</th></tr></thead>
+      <tbody>
+      {% for d in debt %}
+        <tr>
+          <td>{{ d.instrument_type }}</td>
+          <td>{{ '${:,.0f}'.format(d.principal) if d.principal else '—' }}</td>
+          <td>{{ d.coupon_rate ~ '%' if d.coupon_rate is not none else '—' }} {{ '(' + d.coupon_type + ')' if d.coupon_type else '' }}</td>
+          <td>{{ d.maturity_date or '—' }}</td>
+          <td><span class="badge badge-{{ 'success' if d.status == 'open' else 'partial' }}">{{ d.status }}</span></td>
+          <td>{{ '%.2f'|format(d.yield_at_issuance_30y) + '%' if d.yield_at_issuance_30y is not none else '—' }}</td>
+          <td>{% if d.source_filing_url %}<a href="{{ d.source_filing_url }}" target="_blank">filing &rarr;</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No debt instruments collected yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Refinancing Stress (latest run)</h2>
+    {% if refi %}
+    <table>
+      <thead><tr><th>Maturity Year</th><th>Principal Maturing</th><th>Wtd Avg Original Coupon</th><th>Current 30Y</th><th>Delta (bps)</th><th>Est. Annual Cost Delta</th></tr></thead>
+      <tbody>
+      {% for r in refi %}
+        <tr>
+          <td>{{ r.maturity_year }}</td>
+          <td>${{ '{:,.0f}'.format(r.principal_maturing) }}</td>
+          <td>{{ '%.3f'|format(r.weighted_avg_original_coupon) }}%</td>
+          <td>{{ '%.3f'|format(r.current_30y_yield) }}%</td>
+          <td>{{ '%.0f'|format(r.estimated_coupon_delta_bps) }}</td>
+          <td>${{ '{:,.0f}'.format(r.estimated_annual_cost_delta) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No refinancing-stress run yet. Run <code>python analysis/refinancing_stress.py</code>.</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Cash Flow &amp; CAPEX Trend {{ '(SEC-derived, full fiscal years only)' if entity.data_tier == 'structured' else '' }}</h2>
+    {% if cashflow_trend and cashflow_trend|length > 1 %}
+    <div class="card"><div id="chart-cashflow" class="chart-holder"></div></div>
+    <div class="pill-row" style="margin-top:-4px;">
+      <span class="badge" style="background:#5b9dff33;color:#5b9dff;">Operating Cash Flow</span>
+      <span class="badge" style="background:#f5a62333;color:#f5a623;">Capex</span>
+      <span class="badge" style="background:#3ecf8e33;color:#3ecf8e;">Free Cash Flow</span>
+    </div>
+    {% endif %}
+
+    {% if summary and summary.latest_fy_capex is not none %}
+    <div class="card" style="margin-top:12px;{{ 'border-color: var(--warn);' if not summary.projection_reliable }}">
+      <h3>CAPEX Outlook (next FY, trend-based)</h3>
+      {% if summary.capex_yoy_growth_pct is not none %}
+        <div class="stat-value">
+          {% if summary.projection_reliable %}
+            {{ '${:,.1f}B'.format(summary.projected_next_fy_capex/1e9) }}
+          {% else %}
+            <span class="badge badge-warning">not reliable to extrapolate</span>
+          {% endif %}
+        </div>
+        <div class="stat-sub">
+          Latest FY capex grew {{ '%.0f'|format(summary.capex_yoy_growth_pct) }}% YoY (${{ '{:,.1f}B'.format(summary.prior_fy_capex/1e9) }} &rarr; ${{ '{:,.1f}B'.format(summary.latest_fy_capex/1e9) }}).
+          {% if not summary.projection_reliable %}
+            A straight-line projection at this growth rate would be misleading &mdash; this reflects an AI-infrastructure
+            buildout catch-up phase, not a stable trend (see the 2026-09-10 research model). Check company guidance instead
+            of this tool's own extrapolation.
+          {% else %}
+            Simple trend projection shown for reference; not company guidance.
+          {% endif %}
+        </div>
+      {% else %}
+        <div class="empty-state">Not enough full-fiscal-year history to compute a YoY trend yet.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if cashflow %}
+    <table>
+      <thead><tr><th>Period End</th><th>Form</th><th>Operating CF</th><th>Capex</th><th>Free Cash Flow</th><th>Cash &amp; Equiv.</th></tr></thead>
+      <tbody>
+      {% for c in cashflow %}
+        <tr>
+          <td>{{ c.period_end }}</td>
+          <td>{{ c.fiscal_period_type or '—' }}</td>
+          <td>{{ '${:,.0f}'.format(c.operating_cash_flow) if c.operating_cash_flow is not none else '—' }}</td>
+          <td>{{ '${:,.0f}'.format(c.capex) if c.capex is not none else '—' }}</td>
+          <td>{{ '${:,.0f}'.format(c.free_cash_flow) if c.free_cash_flow is not none else '—' }}</td>
+          <td>{{ '${:,.0f}'.format(c.cash_and_equivalents) if c.cash_and_equivalents is not none else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No cash flow data collected yet (or this entity is private -- see reported events below).</div>
+    {% endif %}
+  </div>
+
+  <div class="section">
+    <h2>Reported Events (press feed, {{ 'unverified unless marked' if entity.data_tier == 'reported_unverified' else 'supplementary' }})</h2>
+    {% if reported %}
+    <table>
+      <thead><tr><th>Date</th><th>Type</th><th>Headline</th><th>Confidence</th><th>Source</th></tr></thead>
+      <tbody>
+      {% for r in reported %}
+        <tr>
+          <td>{{ r.event_date }}</td>
+          <td>{{ r.event_type }}</td>
+          <td>{{ r.headline }}</td>
+          <td><span class="badge badge-{{ 'success' if r.confidence == 'press_confirmed' else 'partial' }}">{{ r.confidence }}</span></td>
+          <td>{% if r.source_url %}<a href="{{ r.source_url }}" target="_blank">{{ r.source_name or 'link' }} &rarr;</a>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No reported events collected yet.</div>
+    {% endif %}
+  </div>
+
+{% endif %}
+</main>
+
+<script>
+// Same minimal self-contained SVG approach as the main dashboard (see
+// index.html) -- multi-series version for Operating CF / Capex / FCF.
+const cashflowTrend = {{ cashflow_trend | tojson }};
+const W = 600, H = 220, PAD = 32;
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  return el;
+}
+
+function multiLineChart(id, data, series) {
+  const holder = document.getElementById(id);
+  if (!holder) return;
+  if (!data || data.length < 2) { holder.innerHTML = '<div class="empty-state">Not enough full-fiscal-year history yet</div>'; return; }
+
+  const allValues = data.flatMap(r => series.map(s => r[s.key]).filter(v => v !== null && v !== undefined));
+  const minV = Math.min(0, ...allValues), maxV = Math.max(...allValues);
+  const span = (maxV - minV) || 1;
+  const n = data.length;
+
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: '240' });
+  const x = i => PAD + (i / Math.max(n - 1, 1)) * (W - 2 * PAD);
+  const y = v => H - PAD - ((v - minV) / span) * (H - 2 * PAD);
+
+  // zero line + min/max labels
+  [minV, maxV].forEach(v => {
+    svg.appendChild(svgEl('line', { x1: PAD, x2: W - PAD, y1: y(v), y2: y(v), stroke: '#2a3348', 'stroke-width': 1 }));
+    const t = svgEl('text', { x: 4, y: y(v) + 4, fill: '#93a0b8', 'font-size': 9 });
+    t.textContent = '$' + (v / 1e9).toFixed(0) + 'B';
+    svg.appendChild(t);
+  });
+  if (minV < 0) {
+    svg.appendChild(svgEl('line', { x1: PAD, x2: W - PAD, y1: y(0), y2: y(0), stroke: '#93a0b8', 'stroke-width': 1, 'stroke-dasharray': '3,3' }));
+  }
+
+  series.forEach(s => {
+    const points = data.map((r, i) => r[s.key] !== null && r[s.key] !== undefined ? `${x(i)},${y(r[s.key])}` : null).filter(Boolean).join(' ');
+    svg.appendChild(svgEl('polyline', { points, fill: 'none', stroke: s.color, 'stroke-width': 2 }));
+    data.forEach((r, i) => {
+      if (r[s.key] === null || r[s.key] === undefined) return;
+      svg.appendChild(svgEl('circle', { cx: x(i), cy: y(r[s.key]), r: 3, fill: s.color }));
+    });
+  });
+
+  data.forEach((r, i) => {
+    const t = svgEl('text', { x: x(i), y: H - 6, fill: '#93a0b8', 'font-size': 9, 'text-anchor': 'middle' });
+    t.textContent = r.period_end;
+    svg.appendChild(t);
+  });
+
+  holder.innerHTML = '';
+  holder.appendChild(svg);
+}
+
+multiLineChart('chart-cashflow', cashflowTrend, [
+  { key: 'operating_cash_flow', color: '#5b9dff' },
+  { key: 'capex', color: '#f5a623' },
+  { key: 'free_cash_flow', color: '#3ecf8e' },
+]);
+</script>
+</body>
+</html>
