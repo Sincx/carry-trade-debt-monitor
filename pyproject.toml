@@ -1,0 +1,29 @@
+[project]
+name = "carry-trade-debt-monitor"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.34",
+    "fastapi>=0.141",
+    "uvicorn>=0.52",
+    "pandas>=3.0",
+    "numpy>=2.5",
+    "statsmodels>=0.15",
+    "scipy>=1.18",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "python-dotenv>=1.0",
+    "jinja2>=3.1",
+    "pypdf>=5.0",
+    "libsql-client>=0.3",
+]
+
+# The dashboard lives at dashboard/app.py (not one of Vercel's default
+# entrypoint locations: app.py, index.py, server.py, main.py, wsgi.py,
+# asgi.py, or those same names under src/ or app/) -- this tells Vercel's
+# zero-config Python detection where to find the FastAPI `app` instance.
+# Only dashboard/app.py + db/connection.py + config/settings.py actually run
+# on Vercel; collectors/analysis/alerts are local-only (mini PC scheduler),
+# per the README.
+[tool.vercel]
+entrypoint = "dashboard.app:app"

@@ -27,7 +27,7 @@ from scipy.stats import pearsonr, spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from config.settings import CORRELATION_WINDOWS, ALERT_THRESHOLDS
-from db.connection import db_cursor, get_connection
+from db.connection import db_cursor, query_df
 
 
 # ---------------------------------------------------------------------------
@@ -35,11 +35,7 @@ from db.connection import db_cursor, get_connection
 # ---------------------------------------------------------------------------
 
 def _load_daily_series(indicator_query: str, params: tuple, date_col: str, value_col: str) -> pd.Series:
-    conn = get_connection()
-    try:
-        df = pd.read_sql_query(indicator_query, conn, params=params)
-    finally:
-        conn.close()
+    df = query_df(indicator_query, params)
     if df.empty:
         return pd.Series(dtype=float)
     df[date_col] = pd.to_datetime(df[date_col])
@@ -69,15 +65,11 @@ def load_rate_differential_daily() -> pd.Series:
 
 
 def load_boj_events() -> pd.DataFrame:
-    conn = get_connection()
-    try:
-        df = pd.read_sql_query(
-            "SELECT date, rate_before, rate_after FROM boj_events "
-            "WHERE event_type='rate_decision' AND rate_before IS NOT NULL AND rate_after IS NOT NULL "
-            "ORDER BY date", conn,
-        )
-    finally:
-        conn.close()
+    df = query_df(
+        "SELECT date, rate_before, rate_after FROM boj_events "
+        "WHERE event_type='rate_decision' AND rate_before IS NOT NULL AND rate_after IS NOT NULL "
+        "ORDER BY date"
+    )
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
         df["surprise"] = df["rate_after"] - df["rate_before"]
@@ -85,14 +77,9 @@ def load_boj_events() -> pd.DataFrame:
 
 
 def load_japan_cpi_events() -> pd.DataFrame:
-    conn = get_connection()
-    try:
-        df = pd.read_sql_query(
-            "SELECT date, value FROM japan_macro_indicators WHERE indicator='cpi_headline_index' ORDER BY date",
-            conn,
-        )
-    finally:
-        conn.close()
+    df = query_df(
+        "SELECT date, value FROM japan_macro_indicators WHERE indicator='cpi_headline_index' ORDER BY date"
+    )
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
         df["yoy_change"] = df["value"].pct_change(12) * 100  # % YoY, assumes monthly cadence
