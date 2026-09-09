@@ -255,3 +255,21 @@ Correlation and refinancing-stress results are pre-computed by
 - Alert delivery is dashboard-only, as specified. Wiring a push channel
   (ntfy, Slack) later just means reading `alerts_log` and dispatching — no
   changes needed to detection logic.
+
+## 7. Candidate future data sources (not yet integrated)
+
+- **[Equibles](https://equibles.com/)** (flagged 2026-09-10, not evaluated
+  in depth) — a freemium financial-data platform offering SEC filings, 13F
+  institutional holdings, insider/Congress trades, earnings call
+  transcripts, FRED economic data, and more, via a free MCP server, REST
+  API, or spreadsheet import. Worth a look for two specific gaps this tool
+  has today: (1) a more structured alternative to the brittle direct-10-K
+  scraping in `collectors/sec_edgar_debt.py` (Section 5's per-filer anchor
+  patterns are inherently fragile to formatting changes), and (2) earnings
+  call transcripts as a richer, more verifiable substitute for the
+  press-feed-only neocloud/AI-lab tier (7.5) — assuming those specific
+  data types fall inside Equibles' free tier. **Before integrating**:
+  confirm what's actually free vs. paid (the site describes "freemium" with
+  advanced features gated) — Section 2's binding constraint is free/public
+  sources only, so any paid tier is out of scope by design, not just by
+  preference. Not yet tested against this tool's actual data needs.
