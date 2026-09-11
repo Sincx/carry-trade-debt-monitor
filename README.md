@@ -300,3 +300,15 @@ literally **"unknown"** (email was fine). Vercel's collaborator-access check app
 complete author identity, not just a verified email — once `git config --global user.name` was set and a fresh
 commit pushed, the deploy went through immediately. If you hit this same error, check `git log --format="%an <%ae>"`
 before anything else.
+
+**Resolved (2026-09-11): "Internal Server Error" after the deploy succeeded.** The build went through fine, but
+every request 500'd with `sqlite3.OperationalError: unable to open database file` (from `db/connection.py`'s
+local-SQLite fallback path — Vercel's filesystem has no `db/monitor.db`, by design). Cause: `vercel env ls`
+showed only `ESTAT_APP_ID` was actually set on the Vercel project — `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN` had
+never been added (the import-screen step in "To set it up" above was missed), so `get_connection()` correctly
+fell through to its local-SQLite fallback, which doesn't exist on Vercel. Fixed via `vercel env add
+TURSO_DATABASE_URL production` / `preview` (and the same for `TURSO_AUTH_TOKEN`), then `vercel deploy --prod` to
+pick up the new env vars — **adding env vars alone does not update an already-built deployment**, a fresh deploy
+is required. Verified working end-to-end afterward (live Turso data rendering on both `/` and `/entity/{id}`).
+If you see this same 500, run `vercel env ls` first to confirm both variables are actually present before
+looking anywhere else.
