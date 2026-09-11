@@ -273,3 +273,29 @@ Correlation and refinancing-stress results are pre-computed by
   advanced features gated) — Section 2's binding constraint is free/public
   sources only, so any paid tier is out of scope by design, not just by
   preference. Not yet tested against this tool's actual data needs.
+
+## 8. Remote dashboard (Vercel + Turso)
+
+The dashboard can run on Vercel instead of (or alongside) `localhost:8420`,
+reading from a remote [Turso](https://turso.tech) (libSQL, SQLite-wire-compatible)
+database instead of the local `db/monitor.db` file. Collectors keep running
+locally (mini PC, Task Scheduler) and write to the same remote database —
+`db/connection.py` transparently switches backend based on whether
+`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` are set (unset = local SQLite, as
+before). See that module's docstring for the compatibility-shim details.
+
+**To set it up:**
+1. Create a Turso database and auth token at [app.turso.tech](https://app.turso.tech), add both to `.env`.
+2. `python db/init_db.py` — applies the schema to Turso instead of the local file once the env vars are set.
+3. Run the normal collector/analysis scripts once to populate it.
+4. Import the repo at [vercel.com/new](https://vercel.com/new); `pyproject.toml`'s `[tool.vercel]` entrypoint
+   and `vercel.json` handle the rest. Add the same two env vars in Vercel's project settings.
+
+**Known open issue (2026-09-11, unresolved):** the first deploy attempt was blocked by Vercel with
+*"The deployment was blocked because the commit author did not have contributing access to the project on
+Vercel. The Hobby Plan does not support collaboration for private repositories."* — even though the pushing
+GitHub account (Sincx) owns both the repo and the Vercel project/team. Ruled out so far: the commit author's
+email (`sinclair.ma77@gmail.com`) is a verified GitHub email; the Vercel project is under the same team as
+other working deployments. The local git identity was also missing `user.name` (fixed). Still investigating —
+if you hit this, check Vercel's own docs on private-repo collaborator access and GitHub App installation
+permissions for the repo, since the cause isn't a simple email mismatch.
